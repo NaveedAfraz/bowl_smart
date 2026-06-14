@@ -86,10 +86,9 @@ Your coaching philosophy:
         max_pace_potential: float,
     ) -> dict:
         """Generate report using Google Gemini API."""
-        import google.generativeai as genai
+        import httpx
 
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
 
         user_prompt = f"""You are the SOLE JUDGE of this bowler's action. Based on the raw biomechanical measurements below, YOU must determine all scores, risk levels, drill recommendations, and coaching feedback. Do NOT just echo the data — interpret it like an elite biomechanics coach would.
 
@@ -197,17 +196,20 @@ Return ONLY the JSON, no markdown formatting or code blocks."""
 
         combined_prompt = f"SYSTEM INSTRUCTIONS:\n{self.SYSTEM_PROMPT}\n\nUSER PROMPT:\n{user_prompt}"
 
-        response = model.generate_content(
-            combined_prompt,
-            generation_config=genai.GenerationConfig(
-                temperature=0.7,
-                max_output_tokens=4096,
-            ),
-        )
-
-        response_text = response.text.strip()
-
-        response_text = response.text.strip()
+        payload = {
+            "contents": [{"parts": [{"text": combined_prompt}]}],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 4096
+            }
+        }
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, timeout=60.0)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            response_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
         # Clean up potential markdown code blocks
         if response_text.startswith("```"):
