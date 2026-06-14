@@ -46,6 +46,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3000",
+        "https://bowl-smart.vercel.app",
         os.environ.get("FRONTEND_URL", "http://localhost:3000"),
     ],
     allow_credentials=True,
