@@ -25,8 +25,8 @@ class VideoProcessor:
 
         # if width < 640 or height < 480:
         #     raise ValueError(f"Video resolution too low: {width}x{height}. Minimum 640x480 required.")
-        if duration > 10:
-            raise ValueError(f"Video too long: {duration:.1f}s. Maximum 10 seconds.")
+        if duration > 30:
+            raise ValueError(f"Video too long: {duration:.1f}s. Maximum 30 seconds.")
         if duration < 2:
             raise ValueError(f"Video too short: {duration:.1f}s. Minimum 2 seconds.")
 
