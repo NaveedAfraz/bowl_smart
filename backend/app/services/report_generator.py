@@ -195,12 +195,10 @@ Return your response as JSON with these EXACT keys:
 
 Return ONLY the JSON, no markdown formatting or code blocks."""
 
+        combined_prompt = f"SYSTEM INSTRUCTIONS:\n{self.SYSTEM_PROMPT}\n\nUSER PROMPT:\n{user_prompt}"
+
         response = model.generate_content(
-            [
-                {"role": "user", "parts": [self.SYSTEM_PROMPT]},
-                {"role": "model", "parts": ["I understand. I'm Dr. BowlSmart, ready to analyze."]},
-                {"role": "user", "parts": [user_prompt]},
-            ],
+            combined_prompt,
             generation_config=genai.GenerationConfig(
                 temperature=0.7,
                 max_output_tokens=4096,
