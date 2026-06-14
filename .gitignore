@@ -15,5 +15,6 @@ coverage/
 uploads/
 annotated_videos/
 *.mp4
+!frontend/public/*.mp4
 *.mkv
 *.mov
