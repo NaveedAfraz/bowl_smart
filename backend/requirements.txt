@@ -12,3 +12,4 @@ httpx>=0.27.0
 Pillow>=10.4.0
 scipy>=1.14.0
 imageio-ffmpeg>=0.5.1
+groq>=0.9.0

@@ -89,7 +89,7 @@ Your coaching philosophy:
         import google.generativeai as genai
 
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
         user_prompt = f"""You are the SOLE JUDGE of this bowler's action. Based on the raw biomechanical measurements below, YOU must determine all scores, risk levels, drill recommendations, and coaching feedback. Do NOT just echo the data — interpret it like an elite biomechanics coach would.
 
