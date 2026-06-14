@@ -50,16 +50,22 @@ class VideoProcessor:
         frame_idx = 0
 
         while cap.isOpened():
-            ret, frame = cap.read()
+            # Grab just the frame pointer (super fast, no decoding)
+            ret = cap.grab()
             if not ret:
                 break
 
             if frame_idx % frame_interval == 0:
-                # Resize if needed
+                # Only decode the frames we actually need
+                ret, frame = cap.retrieve()
+                if not ret:
+                    break
+
+                # Resize if needed (using INTER_AREA for high-quality downscaling)
                 h, w = frame.shape[:2]
                 if max(h, w) > max_dimension:
                     scale = max_dimension / max(h, w)
-                    frame = cv2.resize(frame, None, fx=scale, fy=scale)
+                    frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
                 # Convert BGR to RGB for MediaPipe
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
