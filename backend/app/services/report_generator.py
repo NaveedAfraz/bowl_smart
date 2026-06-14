@@ -45,17 +45,7 @@ Your coaching philosophy:
     ) -> dict:
         """Generate a complete bowling analysis report. Tries Gemini first, falls back to rule-based."""
 
-        # Try Gemini API if key is available
-        if settings.GEMINI_API_KEY:
-            try:
-                return await self._generate_with_gemini(
-                    bowler_profile, biomechanics, phase_scores,
-                    overall_score, injury_risk, pace_leaks, max_pace_potential,
-                )
-            except Exception as e:
-                print(f"Gemini API failed: {e}. Trying Groq fallback.")
-
-        # Try Groq API as secondary
+        # Try Groq API first (user requested prioritization)
         if settings.GROQ_API_KEY:
             try:
                 return await self._generate_with_groq(
@@ -63,7 +53,17 @@ Your coaching philosophy:
                     overall_score, injury_risk, pace_leaks, max_pace_potential,
                 )
             except Exception as e:
-                print(f"Groq API failed: {e}")
+                print(f"Groq API failed: {e}. Trying Gemini fallback.")
+
+        # Try Gemini API as secondary
+        if settings.GEMINI_API_KEY:
+            try:
+                return await self._generate_with_gemini(
+                    bowler_profile, biomechanics, phase_scores,
+                    overall_score, injury_risk, pace_leaks, max_pace_potential,
+                )
+            except Exception as e:
+                print(f"Gemini API failed: {e}")
 
         # The user requested to comment out the hardcoded fallback generator
         # # Fallback: generate report from biomechanics data directly
