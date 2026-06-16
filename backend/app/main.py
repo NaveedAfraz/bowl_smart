@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 import uuid
+# Trigger reload: env key updated and groq disabled (thinking budget zero added)
 import os
 import asyncio
 import numpy as np

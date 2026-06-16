@@ -45,15 +45,15 @@ Your coaching philosophy:
     ) -> dict:
         """Generate a complete bowling analysis report. Tries Gemini first, falls back to rule-based."""
 
-        # Try Groq API first (user requested prioritization)
-        if settings.GROQ_API_KEY:
-            try:
-                return await self._generate_with_groq(
-                    bowler_profile, biomechanics, phase_scores,
-                    overall_score, injury_risk, pace_leaks, max_pace_potential,
-                )
-            except Exception as e:
-                print(f"Groq API failed: {e}. Trying Gemini fallback.")
+        # Try Groq API first (commented out per user request)
+        # if settings.GROQ_API_KEY:
+        #     try:
+        #         return await self._generate_with_groq(
+        #             bowler_profile, biomechanics, phase_scores,
+        #             overall_score, injury_risk, pace_leaks, max_pace_potential,
+        #         )
+        #     except Exception as e:
+        #         print(f"Groq API failed: {e}. Trying Gemini fallback.")
 
         # Try Gemini API as secondary
         if settings.GEMINI_API_KEY:
@@ -63,6 +63,8 @@ Your coaching philosophy:
                     overall_score, injury_risk, pace_leaks, max_pace_potential,
                 )
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"Gemini API failed: {e}")
 
         # The user requested to comment out the hardcoded fallback generator
@@ -88,7 +90,16 @@ Your coaching philosophy:
         """Generate report using Google Gemini API."""
         import httpx
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
+        # Safeguard phase scores dictionary parsing
+        phase_boundaries = {}
+        if isinstance(phase_scores, dict):
+            for k, v in phase_scores.items():
+                if isinstance(v, dict):
+                    phase_boundaries[k] = {
+                        "start_frame": v.get("start_frame"),
+                        "end_frame": v.get("end_frame")
+                    }
+        detected_phases_json = json.dumps(phase_boundaries, indent=2, default=str)
 
         user_prompt = f"""You are the SOLE JUDGE of this bowler's action. Based on the raw biomechanical measurements below, YOU must determine all scores, risk levels, drill recommendations, and coaching feedback. Do NOT just echo the data — interpret it like an elite biomechanics coach would.
 
@@ -105,7 +116,7 @@ RAW BIOMECHANICAL MEASUREMENTS (from MediaPipe pose analysis):
 {json.dumps(biomechanics, indent=2, default=str)}
 
 DETECTED BOWLING PHASES (frame boundaries):
-{json.dumps({{k: {{'start_frame': v.get('start_frame'), 'end_frame': v.get('end_frame')}} for k, v in (phase_scores if isinstance(phase_scores, dict) else {{}}).items()}}, indent=2, default=str)}
+{detected_phases_json}
 
 YOUR TASK — Judge this bowler's action and produce a COMPLETE analysis. You decide:
 1. Overall form score (0-100) based on how the biomechanics compare to elite fast bowling standards
@@ -196,120 +207,164 @@ Return ONLY the JSON, no markdown formatting or code blocks."""
 
         combined_prompt = f"SYSTEM INSTRUCTIONS:\n{self.SYSTEM_PROMPT}\n\nUSER PROMPT:\n{user_prompt}"
 
-        payload = {
-            "contents": [{"parts": [{"text": combined_prompt}]}],
-            "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 4096
-            }
-        }
+        models = [
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-3.5-flash",
+            "gemini-1.5-flash"
+        ]
         
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json=payload, timeout=60.0)
-            resp.raise_for_status()
-            data = resp.json()
+        last_error = None
+        for model in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={settings.GEMINI_API_KEY}"
             
-            response_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-
-        # Clean up potential markdown code blocks
-        if response_text.startswith("```"):
-            response_text = response_text.split("\n", 1)[1]
-        if response_text.endswith("```"):
-            response_text = response_text.rsplit("```", 1)[0]
-        response_text = response_text.strip()
-
-        return json.loads(response_text)
-
-    async def _generate_with_groq(
-        self,
-        bowler_profile: dict,
-        biomechanics: dict,
-        phase_scores: dict,
-        overall_score: int,
-        injury_risk: dict,
-        pace_leaks: list,
-        max_pace_potential: float,
-    ) -> dict:
-        """Generate report using Groq API as a fallback."""
-        from groq import AsyncGroq
-
-        client = AsyncGroq(api_key=settings.GROQ_API_KEY)
-        
-        user_prompt = f"""You are the SOLE JUDGE of this bowler's action. Based on the raw biomechanical measurements below, YOU must determine all scores, risk levels, drill recommendations, and coaching feedback. Do NOT just echo the data — interpret it like an elite biomechanics coach would.
-
-BOWLER PROFILE:
-- Age: {bowler_profile.get('age', 'unknown')}
-- Height: {bowler_profile.get('height_cm', 'unknown')} cm
-- Weight: {bowler_profile.get('weight_kg', 'unknown')} kg
-- Dominant Arm: {bowler_profile.get('dominant_arm', 'right')}
-- Bowling Style: {bowler_profile.get('bowling_style', 'seam')}
-- Experience Level: {bowler_profile.get('experience_level', 'club')}
-
-RAW BIOMECHANICAL MEASUREMENTS:
-{json.dumps(biomechanics, indent=2, default=str)}
-
-DETECTED BOWLING PHASES:
-{json.dumps({k: {'start_frame': v.get('start_frame'), 'end_frame': v.get('end_frame')} for k, v in (phase_scores if isinstance(phase_scores, dict) else {}).items()}, indent=2, default=str)}
-
-Respond ONLY with valid JSON using the EXACT schema required. No markdown blocks, no extra text.
-"""
-        
-        # We must append the JSON schema rules to the system prompt to force correct output
-        system_instructions = self.SYSTEM_PROMPT + """
-You must return your response as a valid JSON object matching this structure EXACTLY:
-{
-  "overall_score": 0,
-  "executive_summary": "string",
-  "phase_scores": {
-    "run_up": {"score": 0, "status": "green", "key_metric": "string"},
-    "bound": {"score": 0, "status": "green", "key_metric": "string"},
-    "back_foot_contact": {"score": 0, "status": "green", "key_metric": "string"},
-    "front_foot_contact": {"score": 0, "status": "green", "key_metric": "string"},
-    "delivery": {"score": 0, "status": "green", "key_metric": "string"},
-    "follow_through": {"score": 0, "status": "green", "key_metric": "string"}
-  },
-  "injury_risk": {
-    "overall_risk": 0,
-    "risk_level": "Moderate",
-    "body_areas": {
-      "lower_back": {"risk": 0, "level": "Low"},
-      "front_knee": {"risk": 0, "level": "Low"},
-      "bowling_shoulder": {"risk": 0, "level": "Low"},
-      "ankle": {"risk": 0, "level": "Low"},
-      "elbow": {"risk": 0, "level": "Low"}
-    },
-    "explanations": {
-      "lower_back": "string",
-      "front_knee": "string"
-    }
-  },
-  "pace_leaks": [{"rank": 1, "issue": "string", "description": "string", "pace_impact_kmh": 0.0, "fix": "string"}],
-  "max_pace_potential": 0.0,
-  "phase_analysis": [{"phase_name": "string", "score": 0, "whats_working": "string", "needs_improvement": "string", "coaching_cue": "string"}],
-  "recommended_drills": [{"name": "string", "purpose": "string", "target_area": "string", "sets_reps": "string", "coaching_cues": ["string"], "category": "body_mechanics"}],
-  "action_plan": [{"priority": 1, "what_to_do": "string", "why_it_matters": "string", "expected_timeline": "string"}],
-  "motivational_note": "string"
-}"""
-
-        completion = await client.chat.completions.create(
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_instructions,
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt,
+            payload = {
+                "contents": [{"parts": [{"text": combined_prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 8192
                 }
-            ],
-            model="llama-3.3-70b-versatile",
-            temperature=0.7,
-            max_tokens=4000,
-            response_format={"type": "json_object"}
-        )
+            }
+            if not model.startswith("gemini-1."):
+                payload["generationConfig"]["thinkingConfig"] = {
+                    "thinkingBudget": 0
+                }
 
-        response_text = completion.choices[0].message.content
-        return json.loads(response_text)
+            try:
+                print(f"Trying Gemini model: {model}...")
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(url, json=payload, timeout=60.0)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    response_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    
+                    # Find the first '{' and the last '}' to extract JSON block robustly
+                    start_idx = response_text.find('{')
+                    end_idx = response_text.rfind('}')
+                    if start_idx != -1 and end_idx != -1:
+                        response_text = response_text[start_idx:end_idx+1]
+                    else:
+                        response_text = response_text.strip()
+                    
+                    try:
+                        return json.loads(response_text)
+                    except json.JSONDecodeError as jde:
+                        print(f"JSON decode failed for model {model}. Raw response was:\n{response_text}")
+                        raise jde
+            except Exception as e:
+                if isinstance(e, httpx.HTTPStatusError):
+                    print(f"Gemini model {model} failed: {e.response.text}")
+                else:
+                    print(f"Gemini model {model} failed: {e}")
+                last_error = e
+                
+        raise last_error
+
+    # async def _generate_with_groq(
+    #     self,
+    #     bowler_profile: dict,
+    #     biomechanics: dict,
+    #     phase_scores: dict,
+    #     overall_score: int,
+    #     injury_risk: dict,
+    #     pace_leaks: list,
+    #     max_pace_potential: float,
+    # ) -> dict:
+    #     """Generate report using Groq API as a fallback."""
+    #     from groq import AsyncGroq
+    # 
+    #     client = AsyncGroq(api_key=settings.GROQ_API_KEY)
+    #     
+    #     user_prompt = f"""You are the SOLE JUDGE of this bowler's action. Based on the raw biomechanical measurements below, YOU must determine all scores, risk levels, drill recommendations, and coaching feedback. Do NOT just echo the data — interpret it like an elite biomechanics coach would.
+    # 
+    # BOWLER PROFILE:
+    # - Age: {bowler_profile.get('age', 'unknown')}
+    # - Height: {bowler_profile.get('height_cm', 'unknown')} cm
+    # - Weight: {bowler_profile.get('weight_kg', 'unknown')} kg
+    # - Dominant Arm: {bowler_profile.get('dominant_arm', 'right')}
+    # - Bowling Style: {bowler_profile.get('bowling_style', 'seam')}
+    # - Experience Level: {bowler_profile.get('experience_level', 'club')}
+    # 
+    # RAW BIOMECHANICAL MEASUREMENTS:
+    # {json.dumps(biomechanics, indent=2, default=str)}
+    # 
+    # DETECTED BOWLING PHASES:
+    # {json.dumps({k: {'start_frame': v.get('start_frame'), 'end_frame': v.get('end_frame')} for k, v in (phase_scores if isinstance(phase_scores, dict) else {}).items()}, indent=2, default=str)}
+    # 
+    # Respond ONLY with valid JSON using the EXACT schema required. No markdown blocks, no extra text.
+    # """
+    #     
+    #     # We must append the JSON schema rules to the system prompt to force correct output
+    #     system_instructions = self.SYSTEM_PROMPT + """
+    # You must return your response as a valid JSON object matching this structure EXACTLY:
+    # {
+    #   "overall_score": 0,
+    #   "executive_summary": "string",
+    #   "phase_scores": {
+    #     "run_up": {"score": 0, "status": "green", "key_metric": "string"},
+    #     "bound": {"score": 0, "status": "green", "key_metric": "string"},
+    #     "back_foot_contact": {"score": 0, "status": "green", "key_metric": "string"},
+    #     "front_foot_contact": {"score": 0, "status": "green", "key_metric": "string"},
+    #     "delivery": {"score": 0, "status": "green", "key_metric": "string"},
+    #     "follow_through": {"score": 0, "status": "green", "key_metric": "string"}
+    #   },
+    #   "injury_risk": {
+    #     "overall_risk": 0,
+    #     "risk_level": "Moderate",
+    #     "body_areas": {
+    #       "lower_back": {"risk": 0, "level": "Low"},
+    #       "front_knee": {"risk": 0, "level": "Low"},
+    #       "bowling_shoulder": {"risk": 0, "level": "Low"},
+    #       "ankle": {"risk": 0, "level": "Low"},
+    #       "elbow": {"risk": 0, "level": "Low"}
+    #     },
+    #     "explanations": {
+    #       "lower_back": "string",
+    #       "front_knee": "string"
+    #     }
+    #   },
+    #   "pace_leaks": [{"rank": 1, "issue": "string", "description": "string", "pace_impact_kmh": 0.0, "fix": "string"}],
+    #   "max_pace_potential": 0.0,
+    #   "phase_analysis": [{"phase_name": "string", "score": 0, "whats_working": "string", "needs_improvement": "string", "coaching_cue": "string"}],
+    #   "recommended_drills": [{"name": "string", "purpose": "string", "target_area": "string", "sets_reps": "string", "coaching_cues": ["string"], "category": "body_mechanics"}],
+    #   "action_plan": [{"priority": 1, "what_to_do": "string", "why_it_matters": "string", "expected_timeline": "string"}],
+    #   "motivational_note": "string"
+    # }"""
+    # 
+    #     models = [
+    #         "llama-3.3-70b-versatile",
+    #         "llama-3.1-8b-instant",
+    #         "llama-3.1-70b-versatile",
+    #         "llama3-8b-8192",
+    #         "mixtral-8x7b-32768"
+    #     ]
+    #     
+    #     last_error = None
+    #     for model in models:
+    #         try:
+    #             completion = await client.chat.completions.create(
+    #                 messages=[
+    #                     {
+    #                         "role": "system",
+    #                         "content": system_instructions,
+    #                     },
+    #                     {
+    #                         "role": "user",
+    #                         "content": user_prompt,
+    #                     }
+    #                 ],
+    #                 model=model,
+    #                 temperature=0.7,
+    #                 max_tokens=4000,
+    #                 response_format={"type": "json_object"}
+    #             )
+    #             response_text = completion.choices[0].message.content
+    #             return json.loads(response_text)
+    #         except Exception as e:
+    #             print(f"Groq model {model} failed: {e}. Trying next model...")
+    #             last_error = e
+    #             
+    #     raise last_error
 
     def _generate_fallback_report(
         self,
