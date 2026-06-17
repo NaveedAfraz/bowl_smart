@@ -158,6 +158,26 @@ class AnalysisStatus(BaseModel):
     error: Optional[str] = None
 
 
+@app.get("/health")
+async def health_check_root():
+    return {
+        "status": "healthy",
+        "service": "bowlsmart-analysis",
+        "version": "1.0.0",
+        "gemini_configured": bool(settings.GEMINI_API_KEY),
+    }
+
+
+@app.get("/api/health")
+async def health_check_api():
+    return {
+        "status": "healthy",
+        "service": "bowlsmart-analysis",
+        "version": "1.0.0",
+        "gemini_configured": bool(settings.GEMINI_API_KEY),
+    }
+
+
 @app.get("/api/v1/health")
 async def health_check():
     return {
